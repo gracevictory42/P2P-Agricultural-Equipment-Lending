@@ -8,6 +8,10 @@
 (define-constant err-rental-active (err u106))
 (define-constant err-rental-expired (err u107))
 
+(define-constant err-already-rated (err u108))
+(define-constant err-invalid-rating (err u109))
+(define-constant err-rental-not-complete (err u110))
+
 (define-data-var next-equipment-id uint u1)
 (define-data-var next-rental-id uint u1)
 
@@ -182,5 +186,89 @@
       (> stacks-block-height (get end-block rental-data))
     )
     false
+  )
+)
+
+
+(define-map equipment-ratings
+  { equipment-id: uint }
+  { total-score: uint, rating-count: uint }
+)
+
+(define-map owner-ratings
+  { owner: principal }
+  { total-score: uint, rating-count: uint }
+)
+
+(define-map user-rating-history
+  { renter: principal, rental-id: uint }
+  { equipment-rating: uint, owner-rating: uint, block-height: uint }
+)
+
+(define-public (rate-rental (rental-id uint) (equipment-rating uint) (owner-rating uint))
+  (let (
+    (rental-data (unwrap! (map-get? rentals { rental-id: rental-id }) err-not-found))
+    (equipment-id (get equipment-id rental-data))
+    (owner (get owner rental-data))
+    (existing-rating (map-get? user-rating-history { renter: tx-sender, rental-id: rental-id }))
+  )
+    (asserts! (is-eq tx-sender (get renter rental-data)) err-unauthorized)
+    (asserts! (get is-returned rental-data) err-rental-not-complete)
+    (asserts! (is-none existing-rating) err-already-rated)
+    (asserts! (and (<= equipment-rating u5) (>= equipment-rating u1)) err-invalid-rating)
+    (asserts! (and (<= owner-rating u5) (>= owner-rating u1)) err-invalid-rating)
+    
+    (let (
+      (equipment-stats (default-to { total-score: u0, rating-count: u0 } 
+                                   (map-get? equipment-ratings { equipment-id: equipment-id })))
+      (owner-stats (default-to { total-score: u0, rating-count: u0 } 
+                               (map-get? owner-ratings { owner: owner })))
+    )
+      (map-set equipment-ratings
+        { equipment-id: equipment-id }
+        { 
+          total-score: (+ (get total-score equipment-stats) equipment-rating),
+          rating-count: (+ (get rating-count equipment-stats) u1)
+        }
+      )
+      
+      (map-set owner-ratings
+        { owner: owner }
+        { 
+          total-score: (+ (get total-score owner-stats) owner-rating),
+          rating-count: (+ (get rating-count owner-stats) u1)
+        }
+      )
+      
+      (map-set user-rating-history
+        { renter: tx-sender, rental-id: rental-id }
+        { 
+          equipment-rating: equipment-rating, 
+          owner-rating: owner-rating, 
+          block-height: stacks-block-height 
+        }
+      )
+      
+      (ok true)
+    )
+  )
+)
+
+(define-read-only (get-equipment-rating (equipment-id uint))
+  (map-get? equipment-ratings { equipment-id: equipment-id })
+)
+
+(define-read-only (get-owner-rating (owner principal))
+  (map-get? owner-ratings { owner: owner })
+)
+
+(define-read-only (get-user-rating (renter principal) (rental-id uint))
+  (map-get? user-rating-history { renter: renter, rental-id: rental-id })
+)
+
+(define-read-only (calculate-average-rating (total-score uint) (rating-count uint))
+  (if (> rating-count u0)
+    (some (/ (* total-score u100) rating-count))
+    none
   )
 )
