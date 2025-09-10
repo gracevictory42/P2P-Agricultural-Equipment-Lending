@@ -8,6 +8,18 @@
 (define-constant err-rental-active (err u106))
 (define-constant err-rental-expired (err u107))
 
+(define-constant err-dispute-exists (err u200))
+(define-constant err-dispute-not-found (err u201))
+(define-constant err-invalid-dispute-type (err u202))
+(define-constant err-dispute-resolved (err u203))
+(define-constant err-already-voted (err u204))
+(define-constant err-insufficient-dispute-stake (err u205))
+(define-constant err-voting-period-ended (err u206))
+(define-constant dispute-stake-amount u1000000)
+(define-constant voting-period-blocks u1008)
+
+(define-data-var next-dispute-id uint u1)
+
 (define-constant err-already-rated (err u108))
 (define-constant err-invalid-rating (err u109))
 (define-constant err-rental-not-complete (err u110))
@@ -271,4 +283,131 @@
     (some (/ (* total-score u100) rating-count))
     none
   )
+)
+
+
+(define-map disputes
+  { dispute-id: uint }
+  {
+    rental-id: uint,
+    complainant: principal,
+    respondent: principal,
+    dispute-type: uint,
+    description: (string-ascii 200),
+    stake-amount: uint,
+    created-block: uint,
+    voting-ends-block: uint,
+    votes-for: uint,
+    votes-against: uint,
+    is-resolved: bool,
+    winner: (optional principal)
+  }
+)
+
+(define-map dispute-votes
+  { dispute-id: uint, voter: principal }
+  { vote: bool, voting-power: uint }
+)
+
+(define-public (file-dispute (rental-id uint) (dispute-type uint) (description (string-ascii 200)))
+  (let (
+    (rental-data (unwrap! (map-get? rentals { rental-id: rental-id }) err-not-found))
+    (dispute-id (var-get next-dispute-id))
+    (complainant tx-sender)
+    (respondent (if (is-eq tx-sender (get renter rental-data)) 
+                    (get owner rental-data) 
+                    (get renter rental-data)))
+  )
+    (asserts! (or (is-eq tx-sender (get renter rental-data)) 
+                  (is-eq tx-sender (get owner rental-data))) err-unauthorized)
+    (asserts! (<= dispute-type u3) err-invalid-dispute-type)
+    (asserts! (>= dispute-type u1) err-invalid-dispute-type)
+    (asserts! (get is-returned rental-data) err-rental-not-complete)
+    
+    (try! (stx-transfer? dispute-stake-amount tx-sender (as-contract tx-sender)))
+    
+    (map-set disputes
+      { dispute-id: dispute-id }
+      {
+        rental-id: rental-id,
+        complainant: complainant,
+        respondent: respondent,
+        dispute-type: dispute-type,
+        description: description,
+        stake-amount: dispute-stake-amount,
+        created-block: stacks-block-height,
+        voting-ends-block: (+ stacks-block-height voting-period-blocks),
+        votes-for: u0,
+        votes-against: u0,
+        is-resolved: false,
+        winner: none
+      }
+    )
+    
+    (var-set next-dispute-id (+ dispute-id u1))
+    (ok dispute-id)
+  )
+)
+
+(define-public (vote-on-dispute (dispute-id uint) (vote-for bool))
+  (let (
+    (dispute-data (unwrap! (map-get? disputes { dispute-id: dispute-id }) err-dispute-not-found))
+    (voting-power u1)
+  )
+    (asserts! (not (get is-resolved dispute-data)) err-dispute-resolved)
+    (asserts! (<= stacks-block-height (get voting-ends-block dispute-data)) err-voting-period-ended)
+    (asserts! (is-none (map-get? dispute-votes { dispute-id: dispute-id, voter: tx-sender })) err-already-voted)
+    
+    (map-set dispute-votes
+      { dispute-id: dispute-id, voter: tx-sender }
+      { vote: vote-for, voting-power: voting-power }
+    )
+    
+    (map-set disputes
+      { dispute-id: dispute-id }
+      (merge dispute-data {
+        votes-for: (if vote-for (+ (get votes-for dispute-data) voting-power) (get votes-for dispute-data)),
+        votes-against: (if vote-for (get votes-against dispute-data) (+ (get votes-against dispute-data) voting-power))
+      })
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (resolve-dispute (dispute-id uint))
+  (let (
+    (dispute-data (unwrap! (map-get? disputes { dispute-id: dispute-id }) err-dispute-not-found))
+  )
+    (asserts! (not (get is-resolved dispute-data)) err-dispute-resolved)
+    (asserts! (> stacks-block-height (get voting-ends-block dispute-data)) err-voting-period-ended)
+    
+    (let (
+      (votes-for (get votes-for dispute-data))
+      (votes-against (get votes-against dispute-data))
+      (winner (if (> votes-for votes-against) 
+                  (some (get complainant dispute-data))
+                  (some (get respondent dispute-data))))
+      (payout-amount (get stake-amount dispute-data))
+    )
+      (map-set disputes
+        { dispute-id: dispute-id }
+        (merge dispute-data { is-resolved: true, winner: winner })
+      )
+      
+      (as-contract (stx-transfer? payout-amount tx-sender (unwrap-panic winner)))
+    )
+  )
+)
+
+(define-read-only (get-dispute (dispute-id uint))
+  (map-get? disputes { dispute-id: dispute-id })
+)
+
+(define-read-only (get-dispute-vote (dispute-id uint) (voter principal))
+  (map-get? dispute-votes { dispute-id: dispute-id, voter: voter })
+)
+
+(define-read-only (get-next-dispute-id)
+  (var-get next-dispute-id)
 )
