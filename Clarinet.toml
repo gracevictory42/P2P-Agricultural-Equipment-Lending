@@ -9,6 +9,11 @@ requirements = []
 path = 'contracts/P2P-Agricultural-Equipment-Lending.clar'
 clarity_version = 3
 epoch = 3.1
+[contracts.equipment-maintenance-escrow]
+path = 'contracts/equipment-maintenance-escrow.clar'
+clarity_version = 3
+epoch = 3.1
+
 [repl.analysis]
 passes = ['check_checker']
 
