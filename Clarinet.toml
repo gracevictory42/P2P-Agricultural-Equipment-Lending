@@ -1,0 +1,28 @@
+[project]
+name = 'P2P-Agricultural-Equipment-Lending'
+description = ''
+authors = []
+telemetry = true
+cache_dir = '.\.cache'
+requirements = []
+[contracts.P2P-Agricultural-Equipment-Lending]
+path = 'contracts/P2P-Agricultural-Equipment-Lending.clar'
+clarity_version = 3
+epoch = 3.1
+[contracts.equipment-maintenance-escrow]
+path = 'contracts/equipment-maintenance-escrow.clar'
+clarity_version = 3
+epoch = 3.1
+
+[repl.analysis]
+passes = ['check_checker']
+
+[repl.analysis.check_checker]
+strict = false
+trusted_sender = false
+trusted_caller = false
+callee_filter = false
+
+[repl.remote_data]
+enabled = false
+api_url = 'https://api.hiro.so'
