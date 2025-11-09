@@ -14,6 +14,10 @@ path = 'contracts/equipment-maintenance-escrow.clar'
 clarity_version = 3
 epoch = 3.1
 
+[contracts.equipment-seasonal-pricing]
+path = 'contracts/equipment-seasonal-pricing.clar'
+clarity_version = 3
+epoch = 3.1
 [repl.analysis]
 passes = ['check_checker']
 
